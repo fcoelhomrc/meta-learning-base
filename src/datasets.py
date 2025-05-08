@@ -1,18 +1,18 @@
-import torch
-import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from enum import Enum
-from torchvision.datasets.folder import ImageFolder
-from torchvision.io import read_image
-
 import os
 import warnings
+from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple, List, Set, Callable
+from typing import Optional, Tuple, List, Callable, Any
+
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision.io import read_image
+
 
 class DomainRole(Enum):
     SOURCE = "source"
     TARGET = "target"
+
 
 class PreprocessingPipeline:
     def __init__(self, source_transform, target_transform):
@@ -51,10 +51,13 @@ class SingleDomainDataset(Dataset):
         return idx, image, label
 
     @staticmethod
-    def _discover_data(root: Path) -> Tuple[List[Path], List[str], Set[str]]:
-        img_paths = []
-        labels = []
+    def _discover_data(root: Path) -> tuple[
+        list[Path], list[str], list[Any]]:
+
+        img_paths: list[Path] = []
+        labels: list[str] = []
         class_set = set()
+
         for dirpath, _, filenames in os.walk(root):
             for filename in filenames:
                 if filename.lower().endswith(SingleDomainDataset.IMG_EXTENSIONS):
@@ -69,6 +72,7 @@ class SingleDomainDataset(Dataset):
     def set_role(self, role: DomainRole):
         self.role = role
 
+
 class CyclicDataLoader(DataLoader):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -76,6 +80,7 @@ class CyclicDataLoader(DataLoader):
     def __iter__(self):
         while True:
             yield from super().__iter__()
+
 
 class MultiDomainDataset:
     def __init__(self, root: str, domains: List[str], roles: List[DomainRole],
@@ -131,7 +136,7 @@ class MultiDomainDataset:
             drop_last: bool = True,  # FIXME: prob. should always be True
             collate_fn: Optional[Callable] = None,
             persistent_workers: Optional[bool] = None,
-        ) -> Tuple[int, List[CyclicDataLoader]] | Tuple[List[int], List[List[CyclicDataLoader]]]:
+    ) -> Tuple[int, List[CyclicDataLoader]] | Tuple[List[int], List[List[CyclicDataLoader]]]:
         """
         Creates one dataloader per source domain.
         They can be combined with zip(*dataloaders) to get the single (infinite) iterable over all domains.
@@ -146,14 +151,14 @@ class MultiDomainDataset:
             steps_per_epoch = max(self.size()) // batch_size
             dataloaders = [
                 CyclicDataLoader(
-                        dataset,
-                        batch_size=batch_size,
-                        shuffle=shuffle,
-                        num_workers=num_workers,
-                        pin_memory=pin_memory,
-                        drop_last=drop_last,
-                        collate_fn=collate_fn,
-                        persistent_workers=persistent_workers,
+                    dataset,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    drop_last=drop_last,
+                    collate_fn=collate_fn,
+                    persistent_workers=persistent_workers,
                 )
                 for role, dataset in zip(self.roles, self.datasets)
                 if role == DomainRole.SOURCE
@@ -194,23 +199,23 @@ class MultiDomainDataset:
             drop_last: bool = False,
             collate_fn: Optional[Callable] = None,
             persistent_workers: Optional[bool] = None,
-        ) -> List[CyclicDataLoader] | List[List[CyclicDataLoader]]:
+    ) -> list[DataLoader[Any]] | list[list[DataLoader[Any]]]:
         """
         Creates one dataloader per target domain.
         Assuming the target domains are used only for evaluation, we do not need to pair them.
-        This means that a basic torch DataLoader is sufficient.
+        This means that a basic torch DataLoader is enough.
         """
         if not use_splits:
             dataloaders = [
                 DataLoader(
-                        dataset,
-                        batch_size=batch_size,
-                        shuffle=shuffle,
-                        num_workers=num_workers,
-                        pin_memory=pin_memory,
-                        drop_last=drop_last,
-                        collate_fn=collate_fn,
-                        persistent_workers=persistent_workers,
+                    dataset,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    num_workers=num_workers,
+                    pin_memory=pin_memory,
+                    drop_last=drop_last,
+                    collate_fn=collate_fn,
+                    persistent_workers=persistent_workers,
                 )
                 for role, dataset in zip(self.roles, self.datasets)
                 if role == DomainRole.TARGET
@@ -235,8 +240,6 @@ class MultiDomainDataset:
                 for i in range(2)
             ]
             return dataloaders
-
-
 
     def _discover_domains(self):
         root_path = Path(self.root)
@@ -285,10 +288,10 @@ class MultiDomainDataset:
     @staticmethod
     def _load_domain(role: DomainRole, root: str, transforms: Optional[PreprocessingPipeline]) -> SingleDomainDataset:
         return SingleDomainDataset(
-                    role=role,
-                    root=root,
-                    transforms=transforms,
-                )
+            role=role,
+            root=root,
+            transforms=transforms,
+        )
 
     def set_role(self, idx: int, role: DomainRole):
         assert idx < len(self.datasets)

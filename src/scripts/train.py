@@ -143,8 +143,9 @@ task = progress_bar.add_task(
     metrics=f"loss: -- • acc: --",
 )
 
+max_steps = steps_per_epoch * args.num_epochs
 with progress_bar:
-    while epochs < args.num_epochs:
+    while steps < max_steps:
         for batch in zipped:
             steps += 1
             epochs += 1 / steps_per_epoch
@@ -164,4 +165,7 @@ with progress_bar:
                 module=model,
                 score=acc,
             )
+
+            if steps >= max_steps:
+                break
 

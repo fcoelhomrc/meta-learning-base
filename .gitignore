@@ -6,5 +6,12 @@ dist/
 wheels/
 *.egg-info
 
+# IDE configs
+.idea
+
 # Virtual environments
 .venv
+
+# Data
+data
+

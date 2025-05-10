@@ -1,10 +1,11 @@
 import copy
 import itertools
-from typing import Tuple
+from typing import Union, Sequence, Tuple, overload
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.autograd as autograd
 
 import torchmetrics
 
@@ -128,12 +129,23 @@ class MLDG(nn.Module):
         optimizer.step()  # update params
         return clone_network, loss.item()
 
-    def _accumulate_grads(self, source_network, scaling_factor):
-        for p_tgt, p_src in zip(self.network.parameters(), source_network.parameters()):
-            if p_src.grad is not None:
-                p_tgt.grad.data.add_(
-                    scaling_factor * p_src.grad.data
-                )
+    @overload
+    def _accumulate_grads(self, source: nn.Module, scaling_factor: float) -> None:
+        ...
+
+    @overload
+    def _accumulate_grads(self, source: Sequence[Union[torch.Tensor, None]], scaling_factor: float) -> None:
+        ...
+
+    def _accumulate_grads(self, source, scaling_factor: float) -> None:
+        if isinstance(source, nn.Module):
+            for p_tgt, p_src in zip(self.network.parameters(), source.parameters()):
+                if p_src.grad is not None:
+                    p_tgt.grad.data.add_(scaling_factor * p_src.grad.data)
+        else:
+            for p_tgt, g in zip(self.network.parameters(), source):
+                if g is not None:
+                    p_tgt.grad.data.add_(scaling_factor * g.data)
 
     @staticmethod
     def _reset_grads(network):
@@ -158,10 +170,21 @@ class MLDG(nn.Module):
             self._accumulate_grads(clone_network, scaling_factor=1 / self.num_domains)
             self._reset_grads(clone_network)
             loss = F.cross_entropy(clone_network(xj), yj)
-            loss.backward()  # compute grads
-            self._accumulate_grads(clone_network, scaling_factor=self.hparams.get("beta") / self.num_domains)
+            grads = autograd.grad(loss, list(clone_network.parameters()), allow_unused=True)
+            self._accumulate_grads(grads, scaling_factor=self.hparams.get("beta") / self.num_domains)
             total_loss += (clone_loss + self.hparams.get("beta") * loss.item())
         self.optimizer.step()  # update original network params with accumulated grads
+
+        # Hack to let wandb.watch log grads of self.network
+        wandb_watch_hack = True
+        if wandb_watch_hack:
+            dummy_input = torch.randn(1, *xi.shape).to(self.device)
+            dummy_output = self.network(dummy_input)
+            dummy_target = dummy_output.detach().clone()
+
+            dummy_loss = F.mse_loss(dummy_output, dummy_target)
+            dummy_loss.backward()  # triggers wandb.watch() logging
+
         return total_loss / self.num_domains
 
     @torch.inference_mode()

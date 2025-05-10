@@ -12,11 +12,11 @@ class Callback(ABC):
 
     @abstractmethod
     def trigger(self, **trigger_kwargs):
-        pass
+        ...
 
     @abstractmethod
     def check(self, **check_kwargs) -> bool:
-        pass
+        ...
 
     def _eval(self, trigger_kwargs, check_kwargs):
         if self.check(**check_kwargs):

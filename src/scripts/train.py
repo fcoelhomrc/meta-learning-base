@@ -135,8 +135,6 @@ progress_bar = rprogress.Progress(
 # Train
 model.train()
 
-wandb.watch(model, log_freq=logging_interval)
-
 task = progress_bar.add_task(
     description="Training",
     total=args.num_epochs,

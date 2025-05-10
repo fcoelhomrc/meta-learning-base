@@ -175,16 +175,6 @@ class MLDG(nn.Module):
             total_loss += (clone_loss + self.hparams.get("beta") * loss.item())
         self.optimizer.step()  # update original network params with accumulated grads
 
-        # Hack to let wandb.watch log grads of self.network
-        wandb_watch_hack = True
-        if wandb_watch_hack:
-            dummy_input = torch.randn(1, *xi.shape).to(self.device)
-            dummy_output = self.network(dummy_input)
-            dummy_target = dummy_output.detach().clone()
-
-            dummy_loss = F.mse_loss(dummy_output, dummy_target)
-            dummy_loss.backward()  # triggers wandb.watch() logging
-
         return total_loss / self.num_domains
 
     @torch.inference_mode()

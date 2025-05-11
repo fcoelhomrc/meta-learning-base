@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser(description="Training script")
 parser.add_argument("--num_classes", type=int, default=7, help="Number of classes in dataset")
 parser.add_argument("--num_epochs", type=int, default=10, help="Number of epochs to train for")
 parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
-
+parser.add_argument("--source_domains", type=int, nargs="+", default=[0, 1, 2], help="Source domains to use" )
 
 parser.add_argument("--nonlinear_classifier", type=bool, default=False, help="Classifier architecture")
 parser.add_argument("--dropout", type=float, default=0., help="Dropout rate to use in classifier head")
@@ -76,7 +76,12 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Device selected: {device}")
 
 domains = ["art_painting", "cartoon", "photo", "sketch"]
-roles = [DomainRole.SOURCE, DomainRole.SOURCE, DomainRole.SOURCE, DomainRole.TARGET]
+roles = [
+    DomainRole.SOURCE if i in args.source_domains else DomainRole.TARGET
+    for i in range(len(domains))
+]
+print(f"Domain roles: {list(zip(domains, roles))}")
+# roles = [DomainRole.SOURCE, DomainRole.SOURCE, DomainRole.SOURCE, DomainRole.TARGET]
 
 dataset = MultiDomainDataset(
     root="data/PACS/",

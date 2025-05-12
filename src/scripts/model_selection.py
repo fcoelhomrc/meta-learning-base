@@ -74,15 +74,8 @@ pipeline = PreprocessingPipeline(
     target_transform=wrapper_albumentations_transform(transform),
 )
 
-
-
-# Flush gpu
-torch.cuda.empty_cache()
-torch.cuda.ipc_collect()
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Device selected: {device}")
-print(f"Found processes running with GPU {device}: {torch.cuda.list_gpu_processes(device)}")
-
 
 domains = ["art_painting", "cartoon", "photo", "sketch"]
 roles = [
@@ -121,13 +114,12 @@ if args.baseline:
             "weight_decay": args.weight_decay,
         }
     )
-
 else:
     model = MLDG(
         network=BaseLearner(
             encoder=Encoder(hparams={}),
             classifier=Classifier(hparams={
-                "num_feats": 2048,2
+                "num_feats": 2048,
                 "num_classes": args.num_classes,
                 "dropout": args.dropout,
                 "nonlinear": args.nonlinear_classifier,
@@ -146,20 +138,33 @@ else:
         }
     )
 
+
 steps_per_epoch, loaders = dataset.build_source_dataloaders(
-    use_splits=False, batch_size=args.batch_size, num_workers=8,
+    use_splits=True, batch_size=args.batch_size, num_workers=8,
     shuffle=True, persistent_workers=True
 )
-zipped = zip(*loaders)
+
+train_steps_per_epoch, val_steps_per_epoch = steps_per_epoch[0], steps_per_epoch[1]
+train_loaders, val_loaders = loaders[0], loaders[1]
+
+train_zipped = zip(*train_loaders)
+val_zipped = zip(*val_loaders)
 
 checkpoint_callback = ModelCheckpoint(
-    save_name=wandb.run.name,
+    save_name=f"{wandb.run.name}_train",
     save_path="dump",
     mode="max",
 )
 
+backup_checkpoint_callback = ModelCheckpoint(
+    save_name=f"{wandb.run.name}_val",
+    save_path="dump",
+    mode="max",
+)
+
+
 logging_interval = 1
-steps = 0
+train_steps = 0
 epochs = 0
 progress_bar = rprogress.Progress(
     rprogress.SpinnerColumn(),
@@ -177,19 +182,21 @@ task = progress_bar.add_task(
     metrics=f"loss: -- • acc: --",
 )
 
-max_steps = steps_per_epoch * args.num_epochs
+max_train_steps = train_steps_per_epoch * args.num_epochs
+max_val_steps = val_steps_per_epoch * args.num_epochs
+
 with progress_bar:
-    while steps < max_steps:
-        for batch in zipped:
-            steps += 1
-            epochs += 1 / steps_per_epoch
+    while train_steps < max_train_steps:
+        for batch in train_zipped:
+            train_steps += 1
+            epochs += 1 / train_steps_per_epoch
 
             loss = model.update(batch)
             acc = model.log_metrics(batch)
 
             progress_bar.update(
                 task,
-                advance=1 / steps_per_epoch,
+                advance=1 / train_steps_per_epoch,
                 metrics=f"loss: {loss:.4f} • acc: {acc:.2%}",
             )
 
@@ -200,6 +207,45 @@ with progress_bar:
                 score=acc,
             )
 
-            if steps >= max_steps:
+            if train_steps >= max_train_steps:
                 break
 
+            if train_steps % train_steps_per_epoch == 0:
+                val_steps = 0
+                val_task = progress_bar.add_task(
+                    description="Validating",
+                    total=max_val_steps,
+                    metrics=f"acc: --",
+                )
+
+                while val_steps < max_val_steps:
+                    acc = 0
+                    count = 0
+                    for batch in val_zipped:
+                        val_steps += 1
+
+                        acc_ = model.log_metrics(batch, )
+
+                        count += 1
+                        acc += acc_
+
+                        progress_bar.update(
+                            val_task,
+                            advance=1,
+                            metrics=f"acc: {acc_:.2%}",
+                        )
+
+                        if val_steps >= max_val_steps:
+                            break
+
+                    acc /= count
+                    wandb.log({"val/acc": acc})
+
+                    backup_checkpoint_callback.eval(
+                        module=model,
+                        score=acc,
+                    )
+
+                progress_bar.remove_task(
+                    val_task,
+                )

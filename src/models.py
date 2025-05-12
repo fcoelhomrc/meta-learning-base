@@ -1,6 +1,6 @@
 import copy
 import itertools
-from typing import Union, Sequence, Tuple, overload
+from typing import Union, Sequence, Tuple, overload, Literal
 
 import torch
 import torch.nn as nn
@@ -9,10 +9,10 @@ import torch.autograd as autograd
 
 import torchmetrics
 
-def compute_metrics(x, y, num_classes):
+def compute_metrics(x, y, num_classes, average: Literal["micro", "macro", "none"] = "micro"):
     probs = F.softmax(x, dim=1)
     labels = torch.argmax(probs, dim=1)
-    acc = torchmetrics.functional.accuracy(labels, y, task="multiclass", num_classes=num_classes)
+    acc = torchmetrics.functional.accuracy(labels, y, task="multiclass", num_classes=num_classes, average=average)
     return acc
 
 def prep_resnet50():
@@ -72,6 +72,54 @@ class BaseLearner(nn.Module):
     def forward(self, x):
         x = self.encoder(x)
         return self.classifier(x)
+
+class ERM(nn.Module):
+
+    def __init__(self, network: BaseLearner, device: str, num_classes: int, num_domains: int, hparams: dict):
+        super(ERM, self).__init__()
+        self.network = network
+        self.device = device
+        self.num_classes = num_classes
+        self.num_domains = num_domains
+        self.hparams = hparams
+
+        self.optimizer = self._setup_optimizer()
+        self.to(self.device)
+
+    def _setup_optimizer(self) -> torch.optim.Optimizer:
+        return torch.optim.Adam(
+            self.network.parameters(),
+            lr=self.hparams.get("lr"),
+            weight_decay=self.hparams.get("weight_decay"),
+        )
+
+    def update(self, batch) -> float:
+        x, y = [], []
+        for (_, xi, yi) in batch:
+            x.append(xi)
+            y.append(yi)
+        x = torch.cat(x, dim=0)
+        y = torch.cat(y, dim=0)
+        x, y = x.to(self.device), y.to(self.device)
+        
+        loss = F.cross_entropy(self.network(x), y)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
+
+    @torch.inference_mode()
+    def log_metrics(self, batch):
+        acc = 0
+        count = 0
+        for (_, x, y) in batch:
+            x, y = x.to(self.device), y.to(self.device)
+            acc += compute_metrics(self.network(x), y, num_classes=self.num_classes)
+            count += 1
+        acc /= count
+        return acc
+
 
 
 class MLDG(nn.Module):

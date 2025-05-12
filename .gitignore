@@ -14,5 +14,6 @@ wheels/
 
 # Data
 data
+dump
 wandb
 few_shot_temp
